@@ -121,7 +121,7 @@ jobs:
         id: cache
         with:
           path: C:/Qt
-          key: qt-624-cache
+          key: qt-660-cache
       
       - name: Install Dependencies
         if: steps.cache.outputs.cache-hit != 'true'
@@ -131,7 +131,7 @@ jobs:
         run: |
           Invoke-WebRequest -Uri "https://download.qt.io/official_releases/online_installers/qt-unified-windows-x64-online.exe" -OutFile ${{ runner.temp }}\qt-unified-windows-x64-online.exe
 
-          . ${{ runner.temp }}\qt-unified-windows-x64-online.exe in --ao --da --al -c --nd -m $env:USERNAME --pw $env:PASSWORD qt.qt6.624.addons.qtconnectivity qt.qt6.624.win64_msvc2019_64 qt.tools.openssl
+          . ${{ runner.temp }}\qt-unified-windows-x64-online.exe in --ao --da --al -c --nd -m $env:USERNAME --pw $env:PASSWORD qt.qt6.660.addons.qtconnectivity qt.qt6.660.win64_msvc2019_64
 
       - name: Build
         shell: pwsh
