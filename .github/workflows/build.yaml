@@ -140,7 +140,7 @@ jobs:
 
           cd ${{ github.workspace }}
 
-          cmake -S. -DCMAKE_BUILD_TYPE=Release -Bbuild -DCMAKE_PREFIX_PATH="C:\Qt\6.2.4\msvc2019_64\lib\cmake" -DOPENSSL_ROOT_DIR="C:\Qt\Tools\OpenSSL\Win_x64" -T host=x64 -A x64
+          cmake -S. -DCMAKE_BUILD_TYPE=Release -Bbuild -DCMAKE_PREFIX_PATH="C:\Qt\6.6.0\msvc2019_64\lib\cmake" -DOPENSSL_ROOT_DIR="C:\Qt\Tools\OpenSSL\Win_x64" -T host=x64 -A x64
 
           cd build
           cmake --build . --config Release
