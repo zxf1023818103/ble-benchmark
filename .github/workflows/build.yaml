@@ -146,7 +146,7 @@ jobs:
           cmake --build . --config Release
           cpack
 
-          . "C:\Qt\6.2.4\msvc2019_64\bin\windeployqt.exe" .\Release
+          . "C:\Qt\6.6.0\msvc2019_64\bin\windeployqt.exe" .\Release
           Remove-Item -Path .\Release\*.pdb, .\Release\*.lib
           $List = Get-ChildItem -Path .\*.json
           $PackageName = $List[0].Name.Replace('.json', '.zip')
