@@ -1,0 +1,161 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+    - '*'
+
+jobs:
+  debian-package-build:
+    name: Build Debian Pacakges
+
+    strategy:
+      matrix:
+        arch: [amd64, armhf, arm64, ppc64el, s390x, riscv64]
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Cache Dependencies
+        uses: actions/cache@v3
+        id: cache
+        with:
+          path: ${{ runner.temp }}/apt
+          key: apt-cache-${{ matrix.arch }}
+
+      - name: Restore Dependencies
+        if: steps.cache.outputs.cache-hit == 'true'
+        run: |
+          sudo cp ${{ runner.temp }}/apt/*.deb /var/cache/apt/archives
+
+      - name: Build
+        run: |
+          echo 'Binary::apt::APT::Keep-Downloaded-Packages "1";' | sudo tee /etc/apt/apt.conf.d/10apt-keep-downloads
+
+          sudo apt-get install -y lsb-core
+
+          sudo rm /etc/apt/sources.list
+
+          codename=$(lsb_release -cs)
+          mirror_url="http://azure.archive.ubuntu.com/ubuntu"
+          port_mirror_url="http://azure.ports.ubuntu.com/"
+          for section1 in {$codename,$codename-updates,$codename-backports,$codename-security}
+          do
+            echo "deb [arch=amd64,i386] $mirror_url $section1 main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list >> /dev/null
+            echo "deb-src [arch=amd64,i386] $mirror_url $section1 main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list >> /dev/null        
+            echo "deb [arch-=amd64,i386] $port_mirror_url $section1 main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list >> /dev/null
+            echo "deb-src [arch-=amd64,i386] $port_mirror_url $section1 main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list >> /dev/null
+          done
+
+          sudo dpkg --add-architecture ${{ matrix.arch }}
+
+          sudo apt-get update -y
+
+          depends="cmake ninja-build qt6-tools-dev-tools qt6-l10n-tools"
+          depends="$depends qt6-tools-dev:${{ matrix.arch }} qt6-base-dev:${{ matrix.arch }} qt6-connectivity-dev:${{ matrix.arch }} libssl-dev:${{ matrix.arch }}"
+          if [ $(dpkg-architecture -q DEB_HOST_ARCH) == ${{ matrix.arch }} ]; then
+            depends="$depends gcc g++"
+          else
+            if [ ${{ matrix.arch }} == amd64 ]; then
+              depends="$depends gcc-x86-64-linux-gnu g++-x86-64-linux-gnu"
+            elif [ ${{ matrix.arch }} == armhf ]; then
+              depends="$depends gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf"
+            elif [ ${{ matrix.arch }} == arm64 ]; then
+              depends="$depends gcc-aarch64-linux-gnu g++-aarch64-linux-gnu"
+            elif [ ${{ matrix.arch }} == ppc64el ]; then
+              depends="$depends gcc-powerpc64le-linux-gnu g++-powerpc64le-linux-gnu"
+            elif [ ${{ matrix.arch }} == s390x ]; then
+              depends="$depends gcc-s390x-linux-gnu g++-s390x-linux-gnu"
+            elif [ ${{ matrix.arch }} == riscv64 ]; then
+              depends="$depends gcc-riscv64-linux-gnu g++-riscv64-linux-gnu"
+            fi
+          fi
+
+          sudo apt-get install -y --no-install-recommends $depends
+
+          cmake --no-warn-unused-cli -G "Ninja" -B$(pwd)/build-${{ matrix.arch }} -S$(pwd) -DCMAKE_BUILD_TYPE:STRING=Release -DCMAKE_TOOLCHAIN_FILE:STRING=${{ matrix.arch }}.cmake
+
+          cd build-${{ matrix.arch }}
+          cmake --build . --parallel
+          cpack -G DEB
+          mv *.deb ..
+          cd ..
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          fail_on_unmatched_files: true
+          files: ${{ github.workspace }}/*.deb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Copy Packages to Cache Directory
+        run: |
+          if [ -e ${{ runner.temp }}/apt ]; then
+            rm -rf ${{ runner.temp }}/apt
+          fi
+          mkdir ${{ runner.temp }}/apt
+          cp /var/cache/apt/archives/*.deb ${{ runner.temp }}/apt
+
+  windows-x86-package-build:
+    
+    name: Build Windows Packages
+
+    runs-on: windows-latest
+    
+    environment: qt
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Cache Dependencies
+        uses: actions/cache@v3
+        id: cache
+        with:
+          path: C:/Qt
+          key: qt-624-cache
+      
+      - name: Install Dependencies
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          USERNAME: ${{ vars.USERNAME }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+        run: |
+          Invoke-WebRequest -Uri "https://download.qt.io/official_releases/online_installers/qt-unified-windows-x64-online.exe" -OutFile ${{ runner.temp }}\qt-unified-windows-x64-online.exe
+
+          . ${{ runner.temp }}\qt-unified-windows-x64-online.exe in --ao --da --al -c --nd -m $env:USERNAME --pw $env:PASSWORD qt.qt6.624.addons.qtconnectivity qt.qt6.624.win64_msvc2019_64 qt.tools.openssl
+
+      - name: Build
+        shell: pwsh
+        run: |
+          & 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\Launch-VsDevShell.ps1' -Arch amd64 -HostArch amd64
+
+          cd ${{ github.workspace }}
+
+          cmake -S. -DCMAKE_BUILD_TYPE=Release -Bbuild -DCMAKE_PREFIX_PATH="C:\Qt\6.2.4\msvc2019_64\lib\cmake" -DOPENSSL_ROOT_DIR="C:\Qt\Tools\OpenSSL\Win_x64" -T host=x64 -A x64
+
+          cd build
+          cmake --build . --config Release
+          cpack
+
+          . "C:\Qt\6.2.4\msvc2019_64\bin\windeployqt.exe" .\Release
+          Remove-Item -Path .\Release\*.pdb, .\Release\*.lib
+          $List = Get-ChildItem -Path .\*.json
+          $PackageName = $List[0].Name.Replace('.json', '.zip')
+          Compress-Archive -Path .\Release\* -DestinationPath ${{ github.workspace }}\$PackageName
+          $PackagePath = "${{ github.workspace }}\$PackageName"
+          $PackagePath = $PackagePath.Replace('\', '/')
+          echo "PACKAGE=$PackagePath" >> $env:GITHUB_ENV
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          fail_on_unmatched_files: true
+          files: ${{ env.PACKAGE }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
